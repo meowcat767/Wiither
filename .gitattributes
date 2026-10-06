@@ -119,14 +119,9 @@
 .vs/slnx.sqlite -text
 /Wiither.slnx -text
 Wiither/Makefile -text
-Wiither/Wiither.dol -text
-Wiither/Wiither.elf -text
 Wiither/Wiither.vcxproj -text
 Wiither/Wiither.vcxproj.filters -text
 Wiither/Wiither.vcxproj.user -text
-Wiither/build/Wiither.elf.map -text
-Wiither/build/main.d -text
-Wiither/build/renderer.d -text
 Wiither/libwiigui/AudioDriver.h -text
 Wiither/libwiigui/Cond.cpp -text
 Wiither/libwiigui/Cond.h -text
