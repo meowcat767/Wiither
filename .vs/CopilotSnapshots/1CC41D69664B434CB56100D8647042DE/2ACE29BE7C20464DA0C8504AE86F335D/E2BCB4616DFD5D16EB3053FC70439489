@@ -1,0 +1,39 @@
+﻿#pragma once
+
+#if defined(_MSC_VER)
+// Help IntelliSense/MSVC parse devkitPro headers by defining the target
+// platform macros when building inside Visual Studio. These macros are
+// normally provided by the devkitPPC toolchain.
+#define __wii__
+#define HW_RVL
+#endif
+
+#include <gccore.h>
+
+struct Color
+{
+	u8 r;
+	u8 g;
+	u8 b;
+	u8 a;
+};
+
+class Renderer
+{
+public:
+	Renderer(GXRModeObj* videoMode, void** framebuffers, u32& framebufferIndex);
+
+	void BeginFrame();
+	void EndFrame();
+
+	void DrawRect(f32 x, f32 y, f32 width, f32 height, Color color);
+	void DrawGradientRect(f32 x, f32 y, f32 width, f32 height, f32 radius, Color color);
+
+private:
+	GXRModeObj* m_videoMode;
+	void** m_framebuffers;
+	u32& m_framebufferIndex;
+
+	void SetupGX();
+	void SetupProjection();
+};

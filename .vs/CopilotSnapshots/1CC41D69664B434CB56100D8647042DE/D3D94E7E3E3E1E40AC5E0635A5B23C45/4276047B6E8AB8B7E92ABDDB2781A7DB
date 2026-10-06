@@ -1,0 +1,283 @@
+﻿#if defined(_MSC_VER)
+#include "compat/msvc_compat.h"
+// Define Wii target macros for IntelliSense when editing in Visual Studio.
+#define __wii__
+#define HW_RVL
+#endif
+
+#include <gccore.h>
+#include <wiiuse/wpad.h>
+
+#include <malloc.h>
+#include <cstring>
+#include <cstdlib>
+#include <stdio.h>
+
+#include "graphics/renderer.hpp"
+
+#define DEFAULT_FIFO_SIZE (512 * 1024)
+
+static GXRModeObj* videoMode = nullptr;
+
+static void* framebuffers[2] = {
+    nullptr,
+    nullptr
+};
+
+static void* gpFifo = nullptr;
+
+// Portable aligned allocation wrapper. Use aligned_alloc/posix_memalign on
+// non-MSVC compilers and _aligned_malloc on MSVC. This avoids build errors
+// when memalign isn't available in the current toolchain.
+static void* aligned_alloc_wrapper(size_t alignment, size_t size)
+{
+#if defined(_MSC_VER)
+    return _aligned_malloc(size, alignment);
+#else
+    // Use memalign on the devkitPPC toolchain (available in libogc).
+    return memalign(alignment, size);
+#endif
+}
+
+static u32 framebufferIndex = 0;
+
+static u32 xfbHeight = 0;
+
+static void InitVideo()
+{
+    VIDEO_Init();
+    printf("[Wiither] VIDEO_Init done\n");
+    WPAD_Init();
+    printf("[Wiither] WPAD_Init done\n");
+
+    videoMode = VIDEO_GetPreferredMode(nullptr);
+    if (!videoMode)
+    {
+        printf("[Wiither] VIDEO_GetPreferredMode returned NULL\n");
+        while (1) VIDEO_WaitVSync();
+    }
+    else
+    {
+        printf("[Wiither] videoMode fbWidth=%u efbHeight=%u xfbHeight=%u aa=%d\n",
+            videoMode->fbWidth, videoMode->efbHeight, videoMode->xfbHeight, videoMode->aa);
+    }
+
+    framebuffers[0] =
+        MEM_K0_TO_K1(
+            SYS_AllocateFramebuffer(videoMode)
+        );
+
+    framebuffers[1] =
+        MEM_K0_TO_K1(
+            SYS_AllocateFramebuffer(videoMode)
+        );
+
+    if (!framebuffers[0] || !framebuffers[1])
+    {
+        printf("[Wiither] framebuffer allocation failed: f0=%p f1=%p\n", framebuffers[0], framebuffers[1]);
+        while (1) VIDEO_WaitVSync();
+    }
+
+    printf("[Wiither] framebuffers: %p %p\n", framebuffers[0], framebuffers[1]);
+
+    VIDEO_Configure(videoMode);
+
+    VIDEO_SetNextFramebuffer(
+        framebuffers[framebufferIndex]
+    );
+
+    VIDEO_SetBlack(false);
+    VIDEO_Flush();
+
+    VIDEO_WaitVSync();
+
+    if (videoMode->viTVMode & VI_NON_INTERLACE)
+        VIDEO_WaitVSync();
+
+    framebufferIndex ^= 1;
+}
+
+static void InitGX()
+{
+    // Allocate FIFO in cached memory (CPU accessible), then map to uncached for GX.
+    void* gpFifoCpu = aligned_alloc_wrapper(
+        32,
+        DEFAULT_FIFO_SIZE
+    );
+
+    if (!gpFifoCpu)
+    {
+        printf("gpFifo allocation failed (size=%u)\n", DEFAULT_FIFO_SIZE);
+        while (1)
+            VIDEO_WaitVSync();
+    }
+
+    // Ensure alignment
+    if (((uintptr_t)gpFifoCpu & 31) != 0)
+    {
+        printf("[Wiither] gpFifoCpu not 32-byte aligned!\n");
+        while (1) VIDEO_WaitVSync();
+    }
+
+    // Use the CPU pointer directly for GX_Init (examples pass the cached
+    // pointer returned by memalign). Clear and flush the CPU buffer so the
+    // GPU reads the initialized data.
+    gpFifo = gpFifoCpu;
+
+    printf("[Wiither] gpFifo=%p size=%u\n", gpFifo, DEFAULT_FIFO_SIZE);
+
+    std::memset(gpFifoCpu, 0, DEFAULT_FIFO_SIZE);
+    DCFlushRange(gpFifoCpu, DEFAULT_FIFO_SIZE);
+
+    GX_Init(gpFifo, DEFAULT_FIFO_SIZE);
+    printf("[Wiither] GX_Init done\n");
+
+    GXColor clearColor = { 20, 40, 80, 255 };
+    GX_SetCopyClear(
+        clearColor,
+        0x00FFFFFF
+    );
+
+    GX_SetViewport(
+        0,
+        0,
+        videoMode->fbWidth,
+        videoMode->efbHeight,
+        0,
+        1
+    );
+
+    const f32 yScale =
+        GX_GetYScaleFactor(
+            videoMode->efbHeight,
+            videoMode->xfbHeight
+        );
+
+    xfbHeight =
+        GX_SetDispCopyYScale(yScale);
+
+    GX_SetScissor(
+        0,
+        0,
+        videoMode->fbWidth,
+        videoMode->efbHeight
+    );
+
+    GX_SetDispCopySrc(
+        0,
+        0,
+        videoMode->fbWidth,
+        videoMode->efbHeight
+    );
+
+    GX_SetDispCopyDst(
+        videoMode->fbWidth,
+        xfbHeight
+    );
+
+    GX_SetCopyFilter(
+        videoMode->aa,
+        videoMode->sample_pattern,
+        GX_TRUE,
+        videoMode->vfilter
+    );
+
+    GX_SetFieldMode(
+        videoMode->field_rendering,
+        (
+            videoMode->viHeight ==
+            2 * videoMode->xfbHeight
+            )
+        ? GX_ENABLE
+        : GX_DISABLE
+    );
+
+    if (videoMode->aa)
+    {
+        GX_SetPixelFmt(
+            GX_PF_RGB565_Z16,
+            GX_ZC_LINEAR
+        );
+    }
+    else
+    {
+        GX_SetPixelFmt(
+            GX_PF_RGB8_Z24,
+            GX_ZC_LINEAR
+        );
+    }
+
+    GX_SetCullMode(GX_CULL_NONE);
+
+    GX_CopyDisp(
+        framebuffers[framebufferIndex],
+        GX_TRUE
+    );
+
+    printf("[Wiither] GX_CopyDisp called with fb=%p\n", framebuffers[framebufferIndex]);
+
+    GX_SetDispCopyGamma(GX_GM_1_0);
+}
+
+int main()
+{
+    InitVideo();
+    InitGX();
+
+    Renderer renderer(
+        videoMode,
+        framebuffers,
+        framebufferIndex
+    );
+
+    while (true)
+    {
+        WPAD_ScanPads();
+
+        if (WPAD_ButtonsDown(0) & WPAD_BUTTON_HOME)
+            break;
+
+        renderer.BeginFrame();
+
+        // Draw background gradient
+        renderer.DrawGradientRect(
+            0,
+            0,
+            640,
+            480,
+            { 110, 185, 235, 255 },
+            { 25, 90, 160, 255 }
+        );
+
+        // Top row: "Tomorrow" button
+        renderer.DrawGlossyButton(
+            200,
+            30,
+            240,
+            40,
+            { 235, 245, 252, 255 }
+        );
+
+        // Bottom row: 5-day forecast buttons (FRI, SAT, SUN, MON, TUE)
+        f32 buttonWidth = 110.0f;
+        f32 buttonHeight = 200.0f;
+        f32 buttonY = 260.0f;
+        f32 spacing = 5.0f;
+        f32 startX = 20.0f;
+
+        for (int i = 0; i < 5; ++i)
+        {
+            renderer.DrawGlossyButton(
+                startX + i * (buttonWidth + spacing),
+                buttonY,
+                buttonWidth,
+                buttonHeight,
+                { 235, 245, 252, 255 }
+            );
+        }
+
+        renderer.EndFrame();
+    }
+
+    return 0;
+}

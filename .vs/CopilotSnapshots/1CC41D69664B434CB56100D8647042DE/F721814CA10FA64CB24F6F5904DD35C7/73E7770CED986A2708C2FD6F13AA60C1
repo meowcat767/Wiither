@@ -1,0 +1,613 @@
+﻿#include "renderer.hpp"
+
+#include <ogc/gu.h>
+
+#include <cmath>
+
+namespace
+{
+    constexpr f32 PI = 3.14159265358979323846f;
+
+    Color Darken(Color color, u8 amount)
+    {
+        return {
+            static_cast<u8>(
+                color.r > amount ? color.r - amount : 0
+            ),
+            static_cast<u8>(
+                color.g > amount ? color.g - amount : 0
+            ),
+            static_cast<u8>(
+                color.b > amount ? color.b - amount : 0
+            ),
+            color.a
+        };
+    }
+
+    Color Lighten(Color color, u8 amount)
+    {
+        return {
+            static_cast<u8>(
+                color.r + amount > 255
+                    ? 255
+                    : color.r + amount
+            ),
+            static_cast<u8>(
+                color.g + amount > 255
+                    ? 255
+                    : color.g + amount
+            ),
+            static_cast<u8>(
+                color.b + amount > 255
+                    ? 255
+                    : color.b + amount
+            ),
+            color.a
+        };
+    }
+}
+
+Renderer::Renderer(
+    GXRModeObj* videoMode,
+    void** framebuffers,
+    u32& framebufferIndex
+)
+    : m_videoMode(videoMode),
+    m_framebuffers(framebuffers),
+    m_framebufferIndex(framebufferIndex)
+{
+    SetupGX();
+}
+
+void Renderer::SetupGX()
+{
+    GX_ClearVtxDesc();
+
+    GX_SetVtxDesc(
+        GX_VA_POS,
+        GX_DIRECT
+    );
+
+    GX_SetVtxDesc(
+        GX_VA_CLR0,
+        GX_DIRECT
+    );
+
+    GX_SetVtxAttrFmt(
+        GX_VTXFMT0,
+        GX_VA_POS,
+        GX_POS_XYZ,
+        GX_F32,
+        0
+    );
+
+    GX_SetVtxAttrFmt(
+        GX_VTXFMT0,
+        GX_VA_CLR0,
+        GX_CLR_RGBA,
+        GX_RGBA8,
+        0
+    );
+
+    GX_SetNumChans(1);
+
+    GX_SetNumTevStages(1);
+
+    GX_SetTevOp(
+        GX_TEVSTAGE0,
+        GX_PASSCLR
+    );
+
+    GX_SetTevOrder(
+        GX_TEVSTAGE0,
+        GX_TEXMAP_NULL,
+        GX_COLOR0A0
+    );
+
+    GX_SetCullMode(GX_CULL_NONE);
+
+    GX_SetZMode(
+        GX_DISABLE,
+        GX_ALWAYS,
+        GX_FALSE
+    );
+
+    GX_SetColorUpdate(GX_TRUE);
+    GX_SetAlphaUpdate(GX_TRUE);
+
+    GX_SetBlendMode(
+        GX_BM_BLEND,
+        GX_BL_SRCALPHA,
+        GX_BL_INVSRCALPHA,
+        GX_LO_CLEAR
+    );
+
+    GX_SetAlphaCompare(
+        GX_ALWAYS,
+        0,
+        GX_AOP_AND,
+        GX_ALWAYS,
+        0
+    );
+}
+
+void Renderer::SetupProjection()
+{
+    Mtx44 projection;
+
+    guOrtho(
+        projection,
+        0.0f,
+        480.0f,
+        0.0f,
+        640.0f,
+        0.0f,
+        1.0f
+    );
+
+    GX_LoadProjectionMtx(
+        projection,
+        GX_ORTHOGRAPHIC
+    );
+
+    Mtx modelView;
+
+    guMtxIdentity(modelView);
+
+    GX_LoadPosMtxImm(
+        modelView,
+        GX_PNMTX0
+    );
+
+    GX_SetCurrentMtx(GX_PNMTX0);
+}
+
+void Renderer::BeginFrame()
+{
+    SetupProjection();
+
+    GX_SetViewport(
+        0.0f,
+        0.0f,
+        static_cast<f32>(m_videoMode->fbWidth),
+        static_cast<f32>(m_videoMode->efbHeight),
+        0.0f,
+        1.0f
+    );
+
+    GX_SetScissor(
+        0,
+        0,
+        m_videoMode->fbWidth,
+        m_videoMode->efbHeight
+    );
+}
+
+void Renderer::EndFrame()
+{
+    GX_DrawDone();
+
+    GX_CopyDisp(
+        m_framebuffers[m_framebufferIndex],
+        GX_TRUE
+    );
+
+    VIDEO_SetNextFramebuffer(
+        m_framebuffers[m_framebufferIndex]
+    );
+
+    VIDEO_Flush();
+
+    VIDEO_WaitVSync();
+
+    m_framebufferIndex ^= 1;
+}
+
+void Renderer::DrawRect(
+    f32 x,
+    f32 y,
+    f32 width,
+    f32 height,
+    Color color
+)
+{
+    GX_Begin(
+        GX_QUADS,
+        GX_VTXFMT0,
+        4
+    );
+
+    GX_Position3f32(x, y, 0.0f);
+    GX_Color4u8(color.r, color.g, color.b, color.a);
+
+    GX_Position3f32(x + width, y, 0.0f);
+    GX_Color4u8(color.r, color.g, color.b, color.a);
+
+    GX_Position3f32(
+        x + width,
+        y + height,
+        0.0f
+    );
+    GX_Color4u8(color.r, color.g, color.b, color.a);
+
+    GX_Position3f32(x, y + height, 0.0f);
+    GX_Color4u8(color.r, color.g, color.b, color.a);
+
+    GX_End();
+}
+
+void Renderer::DrawGradientRect(
+    f32 x,
+    f32 y,
+    f32 width,
+    f32 height,
+    Color topColor,
+    Color bottomColor
+)
+{
+    const f32 x2 = x + width;
+    const f32 y2 = y + height;
+
+    GX_Begin(
+        GX_QUADS,
+        GX_VTXFMT0,
+        4
+    );
+
+    // Top-left
+    GX_Color4u8(topColor.r, topColor.g, topColor.b, topColor.a);
+    GX_Position3f32(x, y, 0.0f);
+
+    // Top-right
+    GX_Color4u8(topColor.r, topColor.g, topColor.b, topColor.a);
+    GX_Position3f32(x2, y, 0.0f);
+
+    // Bottom-right
+    GX_Color4u8(bottomColor.r, bottomColor.g, bottomColor.b, bottomColor.a);
+    GX_Position3f32(x2, y2, 0.0f);
+
+    // Bottom-left
+    GX_Color4u8(bottomColor.r, bottomColor.g, bottomColor.b, bottomColor.a);
+    GX_Position3f32(x, y2, 0.0f);
+
+    GX_End();
+}
+
+void Renderer::DrawGlossyButton(
+    f32 x,
+    f32 y,
+    f32 width,
+    f32 height,
+    Color color
+)
+{
+    // Base: simple two-tone gradient (slightly lighter top)
+    Color top = { static_cast<u8>(std::min(255, color.r + 15)),
+                  static_cast<u8>(std::min(255, color.g + 15)),
+                  static_cast<u8>(std::min(255, color.b + 15)),
+                  color.a };
+
+    DrawGradientRect(x, y, width, height, top, color);
+
+    // Gloss highlight: semi-transparent white rectangle on top half
+    Color gloss = { 255, 255, 255, 180 };
+    DrawGradientRect(x + 4.0f, y + 4.0f, width - 8.0f, height / 2.0f, gloss, { 255, 255, 255, 0 });
+}
+
+void Renderer::DrawGradientRect(
+    f32 x,
+    f32 y,
+    f32 width,
+    f32 height,
+    Color topColor,
+    Color bottomColor
+)
+{
+    GX_Begin(
+        GX_QUADS,
+        GX_VTXFMT0,
+        4
+    );
+
+    // Top-left
+    GX_Position3f32(
+        x,
+        y,
+        0.0f
+    );
+
+    GX_Color4u8(
+        topColor.r,
+        topColor.g,
+        topColor.b,
+        topColor.a
+    );
+
+    // Top-right
+    GX_Position3f32(
+        x + width,
+        y,
+        0.0f
+    );
+
+    GX_Color4u8(
+        topColor.r,
+        topColor.g,
+        topColor.b,
+        topColor.a
+    );
+
+    // Bottom-right
+    GX_Position3f32(
+        x + width,
+        y + height,
+        0.0f
+    );
+
+    GX_Color4u8(
+        bottomColor.r,
+        bottomColor.g,
+        bottomColor.b,
+        bottomColor.a
+    );
+
+    // Bottom-left
+    GX_Position3f32(
+        x,
+        y + height,
+        0.0f
+    );
+
+    GX_Color4u8(
+        bottomColor.r,
+        bottomColor.g,
+        bottomColor.b,
+        bottomColor.a
+    );
+
+    GX_End();
+}
+
+void Renderer::DrawRoundedRect(
+    f32 x,
+    f32 y,
+    f32 width,
+    f32 height,
+    f32 radius,
+    Color color
+)
+{
+    /*
+     * Keep the radius sensible.
+     */
+    if (radius < 0.0f)
+        radius = 0.0f;
+
+    const f32 maxRadius =
+        (width < height ? width : height) * 0.5f;
+
+    if (radius > maxRadius)
+        radius = maxRadius;
+
+    /*
+     * Eight segments per corner gives us a
+     * smooth enough curve for Wii-era UI.
+     */
+    constexpr int SEGMENTS_PER_CORNER = 8;
+
+    constexpr int CORNERS = 4;
+
+    constexpr int VERTICES =
+        CORNERS * SEGMENTS_PER_CORNER;
+
+    /*
+     * Triangle fan:
+     *
+     *                 perimeter
+     *              ╭──────────╮
+     *              │     •    │
+     *              │    /|\   │
+     *              │   / | \  │
+     *              ╰──────────╯
+     *                   center
+     */
+    GX_Begin(
+        GX_TRIANGLEFAN,
+        GX_VTXFMT0,
+        VERTICES + 2
+    );
+
+    /*
+     * Centre vertex.
+     */
+    GX_Position3f32(
+        x + width * 0.5f,
+        y + height * 0.5f,
+        0.0f
+    );
+
+    GX_Color4u8(
+        color.r,
+        color.g,
+        color.b,
+        color.a
+    );
+
+    const f32 centersX[CORNERS] = {
+        x + width - radius,
+        x + width - radius,
+        x + radius,
+        x + radius
+    };
+
+    const f32 centersY[CORNERS] = {
+        y + radius,
+        y + height - radius,
+        y + height - radius,
+        y + radius
+    };
+
+    const f32 startAngles[CORNERS] = {
+        0.0f,
+        PI * 0.5f,
+        PI,
+        PI * 1.5f
+    };
+
+    /*
+     * Start at the first corner.
+     */
+    for (int corner = 0; corner < CORNERS; ++corner)
+    {
+        const f32 start = startAngles[corner];
+
+        for (int segment = 0;
+            segment <= SEGMENTS_PER_CORNER;
+            ++segment)
+        {
+            /*
+             * Avoid duplicating the final point of each
+             * corner except where the next corner needs it.
+             */
+            if (corner != CORNERS - 1 &&
+                segment == SEGMENTS_PER_CORNER)
+            {
+                continue;
+            }
+
+            const f32 angle =
+                start +
+                (PI * 0.5f) *
+                (
+                    static_cast<f32>(segment) /
+                    SEGMENTS_PER_CORNER
+                    );
+
+            const f32 px =
+                centersX[corner] +
+                std::cos(angle) * radius;
+
+            const f32 py =
+                centersY[corner] +
+                std::sin(angle) * radius;
+
+            GX_Position3f32(
+                px,
+                py,
+                0.0f
+            );
+
+            GX_Color4u8(
+                color.r,
+                color.g,
+                color.b,
+                color.a
+            );
+        }
+    }
+
+    /*
+     * Close the fan.
+     */
+    GX_Position3f32(
+        x + width - radius,
+        y + radius,
+        0.0f
+    );
+
+    GX_Color4u8(
+        color.r,
+        color.g,
+        color.b,
+        color.a
+    );
+
+    GX_End();
+}
+
+void Renderer::DrawGlossyButton(
+    f32 x,
+    f32 y,
+    f32 width,
+    f32 height,
+    Color color
+)
+{
+    /*
+     * 1. Soft blue shadow underneath.
+     */
+    DrawRoundedRect(
+        x,
+        y + 3.0f,
+        width,
+        height,
+        12.0f,
+        { 30, 80, 140, 100 }
+    );
+
+    /*
+     * 2. Main button body.
+     */
+    DrawRoundedRect(
+        x,
+        y,
+        width,
+        height,
+        12.0f,
+        color
+    );
+
+    /*
+     * 3. Bright upper gloss.
+     *
+     * This is deliberately smaller than the button,
+     * giving the plastic surface its highlight.
+     */
+    DrawRoundedRect(
+        x + 3.0f,
+        y + 3.0f,
+        width - 6.0f,
+        height * 0.42f,
+        9.0f,
+        {
+            Lighten(color, 18).r,
+            Lighten(color, 18).g,
+            Lighten(color, 18).b,
+            110
+        }
+    );
+
+    /*
+     * 4. Tiny bright rim along the top.
+     */
+    DrawRoundedRect(
+        x + 5.0f,
+        y + 4.0f,
+        width - 10.0f,
+        3.0f,
+        2.0f,
+        {
+            255,
+            255,
+            255,
+            150
+        }
+    );
+
+    /*
+     * 5. Slightly darker lower section.
+     */
+    DrawRoundedRect(
+        x + 3.0f,
+        y + height * 0.72f,
+        width - 6.0f,
+        height * 0.22f,
+        7.0f,
+        {
+            Darken(color, 12).r,
+            Darken(color, 12).g,
+            Darken(color, 12).b,
+            45
+        }
+    );
+}

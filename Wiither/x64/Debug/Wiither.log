@@ -1,0 +1,9 @@
+﻿  renderer.cpp
+C:/Users/benho/source/repos/Wiither/Wiither/source/graphics/renderer.cpp(28,11): warning G0799F2A0: 'Color {anonymous}::Lighten(Color, u8)' defined but not used [-Wunused-function]
+     28 |     Color Lighten(Color color, u8 amount)
+        |           ^~~~~~~
+C:/Users/benho/source/repos/Wiither/Wiither/source/graphics/renderer.cpp(12,11): warning GF9B45A18: 'Color {anonymous}::Darken(Color, u8)' defined but not used [-Wunused-function]
+     12 |     Color Darken(Color color, u8 amount)
+        |           ^~~~~~
+  linking ... Wiither.elf
+  output ... Wiither.dol

@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="Wiither/Wiither.vcxproj" Id="a0b4d518-4d7f-4925-a611-cb362010c50f" />
+</Solution>

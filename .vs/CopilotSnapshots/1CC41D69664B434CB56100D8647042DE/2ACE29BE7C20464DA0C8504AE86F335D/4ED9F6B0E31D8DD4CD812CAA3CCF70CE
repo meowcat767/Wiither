@@ -1,0 +1,30 @@
+﻿#pragma once
+
+#include <gccore.h>
+
+struct Color
+{
+	u8 r;
+	u8 g;
+	u8 b;
+	u8 a;
+};
+
+class Renderer
+{
+public:
+	Renderer(GXRModeObj* videoMode, void** framebuffers, u32& numFramebuffers);
+
+	void BeginFrame();
+	void EndFrame();
+
+	void DrawRect(f32 x, f32 y, f32 width, f32 height, Color color);
+
+private:
+	GXRModeObj* m_videoMode;
+	void** m_framebuffers;
+	u32& m_frameBufferIndex;
+
+	void SetupGX();
+	void SetupProjection();
+};
