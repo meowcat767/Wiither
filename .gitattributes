@@ -127,11 +127,6 @@ Wiither/Wiither.vcxproj.user -text
 Wiither/build/Wiither.elf.map -text
 Wiither/build/main.d -text
 Wiither/build/renderer.d -text
-Wiither/source/compat/msvc_compat.h -text
-Wiither/source/graphics/renderer.cpp -text
-Wiither/source/graphics/renderer.hpp -text
-Wiither/source/main.cpp -text
-Wiither/source/weather/weather_api.cpp -text
 Wiither/x64/Debug/Makefile.cpp.obj.dt.d.json -text
 Wiither/x64/Debug/Makefile.cpp.obj.dt.module.json -text
 Wiither/x64/Debug/Makefile.cpp.obj.dt.module.json.command -text
