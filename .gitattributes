@@ -244,6 +244,7 @@ Wiither/libwiigui/wut/shaders/Texture2DShader.h -text
 Wiither/libwiigui/wut/shaders/VertexShader.h -text
 Wiither/source/forcast_ui.cpp -text
 Wiither/source/forcast_ui.hpp -text
+Wiither/source/main.cpp -text
 Wiither/x64/Debug/Makefile.cpp.obj.dt.d.json -text
 Wiither/x64/Debug/Makefile.cpp.obj.dt.module.json -text
 Wiither/x64/Debug/Makefile.cpp.obj.dt.module.json.command -text

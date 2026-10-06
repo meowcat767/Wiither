@@ -1,0 +1,207 @@
+#include <gccore.h>
+#include <wiiuse/wpad.h>
+
+#include <malloc.h>
+#include <cstring>
+
+#include "renderer.hpp"
+#include "forecast_ui.hpp"
+
+#define DEFAULT_FIFO_SIZE (256 * 1024)
+
+static GXRModeObj* videoMode = nullptr;
+
+static void* framebuffers[2] = {
+    nullptr,
+    nullptr
+};
+
+static void* gpFifo = nullptr;
+
+static u32 framebufferIndex = 0;
+
+static u32 xfbHeight = 0;
+
+static void InitVideo()
+{
+    VIDEO_Init();
+    WPAD_Init();
+
+    videoMode = VIDEO_GetPreferredMode(nullptr);
+
+    framebuffers[0] =
+        MEM_K0_TO_K1(
+            SYS_AllocateFramebuffer(videoMode)
+        );
+
+    framebuffers[1] =
+        MEM_K0_TO_K1(
+            SYS_AllocateFramebuffer(videoMode)
+        );
+
+    VIDEO_Configure(videoMode);
+
+    VIDEO_SetNextFramebuffer(
+        framebuffers[framebufferIndex]
+    );
+
+    VIDEO_SetBlack(false);
+    VIDEO_Flush();
+
+    VIDEO_WaitVSync();
+
+    if (videoMode->viTVMode & VI_NON_INTERLACE)
+        VIDEO_WaitVSync();
+
+    framebufferIndex ^= 1;
+}
+
+static void InitGX()
+{
+    gpFifo = memalign(
+        32,
+        DEFAULT_FIFO_SIZE
+    );
+
+    std::memset(
+        gpFifo,
+        0,
+        DEFAULT_FIFO_SIZE
+    );
+
+    GX_Init(
+        gpFifo,
+        DEFAULT_FIFO_SIZE
+    );
+
+    GX_SetCopyClear(
+        {
+            20,
+            40,
+            80,
+            255
+        },
+        0x00FFFFFF
+    );
+
+    GX_SetViewport(
+        0,
+        0,
+        videoMode->fbWidth,
+        videoMode->efbHeight,
+        0,
+        1
+    );
+
+    const f32 yScale =
+        GX_GetYScaleFactor(
+            videoMode->efbHeight,
+            videoMode->xfbHeight
+        );
+
+    xfbHeight =
+        GX_SetDispCopyYScale(yScale);
+
+    GX_SetScissor(
+        0,
+        0,
+        videoMode->fbWidth,
+        videoMode->efbHeight
+    );
+
+    GX_SetDispCopySrc(
+        0,
+        0,
+        videoMode->fbWidth,
+        videoMode->efbHeight
+    );
+
+    GX_SetDispCopyDst(
+        videoMode->fbWidth,
+        xfbHeight
+    );
+
+    GX_SetCopyFilter(
+        videoMode->aa,
+        videoMode->sample_pattern,
+        GX_TRUE,
+        videoMode->vfilter
+    );
+
+    GX_SetFieldMode(
+        videoMode->field_rendering,
+        (
+            videoMode->viHeight ==
+            2 * videoMode->xfbHeight
+        )
+            ? GX_ENABLE
+            : GX_DISABLE
+    );
+
+    if (videoMode->aa)
+    {
+        GX_SetPixelFmt(
+            GX_PF_RGB565_Z16,
+            GX_ZC_LINEAR
+        );
+    }
+    else
+    {
+        GX_SetPixelFmt(
+            GX_PF_RGB8_Z24,
+            GX_ZC_LINEAR
+        );
+    }
+
+    GX_SetCullMode(GX_CULL_NONE);
+
+    GX_CopyDisp(
+        framebuffers[framebufferIndex],
+        GX_TRUE
+    );
+
+    GX_SetDispCopyGamma(GX_GM_1_0);
+}
+
+int main()
+{
+    InitVideo();
+    InitGX();
+
+    Renderer renderer(
+        videoMode,
+        framebuffers,
+        framebufferIndex
+    );
+
+    ForecastUI ui;
+
+    ui.Initialize(renderer);
+
+    while (true)
+    {
+        WPAD_ScanPads();
+
+        if (WPAD_ButtonsDown(0) & WPAD_BUTTON_HOME)
+            break;
+
+        renderer.BeginFrame();
+
+        renderer.DrawGradientRect(
+            0,
+            0,
+            640,
+            480,
+            { 110, 185, 235, 255 },
+            { 25, 90, 160, 255 }
+        );
+
+        ui.Update();
+        ui.Draw();
+
+        renderer.EndFrame();
+    }
+
+    return 0;
+}
+
