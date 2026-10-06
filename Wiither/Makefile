@@ -20,10 +20,10 @@ include $(DEVKITPPC)/wii_rules
 TARGET		:=	Wiither
 
 BUILD		:=	build
-SOURCES		:=	source source/graphics
+SOURCES		:=	source source/graphics libwiigui
 DATA		:=	data
 TEXTURES	:=	textures
-INCLUDES	:=	include
+INCLUDES	:=	include libwiigui
 
 #---------------------------------------------------------------------------------
 # Compiler options
